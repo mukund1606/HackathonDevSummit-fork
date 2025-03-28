@@ -3,6 +3,7 @@ import React from "react";
 import { motion } from "motion/react";
 import dynamic from "next/dynamic";
 import HighlightButton from "./Highlightbtn";
+import BorderMagicButton from "./BorderMagicbtn";
 
 const World = dynamic(() => import("@/components/ui/globe").then((m) => m.World), {
     ssr: false,

@@ -8,7 +8,7 @@ export default function Navbar() {
       {/* Highlighted SonicBridge Title */}
       <Link href="/">
       <h1 className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-red-500 to-orange-500 dark:from-white dark:to-gray-300">
-  SonicBridge
+  Sonic Bridge
 </h1>
 
       </Link>
