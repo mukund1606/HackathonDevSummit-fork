@@ -112,7 +112,7 @@ export default function WebRTCPage() {
         {/* Header */}
         <div className="flex justify-between items-center">
           <h1 className="text-2xl font-bold text-blue-600 dark:text-blue-400">
-            WebRTC Communication
+            AI To AI Communication
           </h1>
           <button
             onClick={() => router.push('/')}
