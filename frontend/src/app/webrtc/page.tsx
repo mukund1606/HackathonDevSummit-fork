@@ -1,9 +1,8 @@
 'use client';
-
 import { useRouter } from 'next/navigation';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import useWebRTC from '@/hooks/useWebRTC';
-import { ArrowLeft, Phone, MessageSquare } from 'lucide-react';
+import { ArrowLeft, Phone, MessageSquare, Mic, MicOff, RefreshCw } from 'lucide-react';
 
 export default function WebRTCPage() {
   const router = useRouter();
@@ -12,104 +11,282 @@ export default function WebRTCPage() {
     remoteStream,
     messages,
     clientId,
+    targetId,
     startCall,
     sendMessage,
-    isCalling
+    isCalling,
+    connectionState,
+    dataChannelState,
+    localFrequencyData,
+    remoteFrequencyData,
+    reconnect
   } = useWebRTC();
   
   const [messageInput, setMessageInput] = useState('');
   const [targetInput, setTargetInput] = useState('');
+  const [audioEnabled, setAudioEnabled] = useState(true);
   const localAudioRef = useRef<HTMLAudioElement>(null);
   const remoteAudioRef = useRef<HTMLAudioElement>(null);
+  const localCanvasRef = useRef<HTMLCanvasElement>(null);
+  const remoteCanvasRef = useRef<HTMLCanvasElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  // Canvas visualization setup
+  const drawFrequency = useCallback((
+    canvas: HTMLCanvasElement | null,
+    frequencyData: Uint8Array | null,
+    color: string
+  ) => {
+    if (!canvas || !frequencyData) return;
+    
+    const ctx = canvas.getContext('2d');
+    const width = canvas.width;
+    const height = canvas.height;
+    
+    if (!ctx) return;
+    ctx.clearRect(0, 0, width, height);
+    
+    const bufferLength = frequencyData.length;
+    const barWidth = (width / bufferLength) * 2.5;
+    let x = 0;
+    
+    frequencyData.forEach((value, i) => {
+      const barHeight = (value / 255) * height;
+      ctx.fillStyle = color;
+      ctx.fillRect(x, height - barHeight, barWidth, barHeight);
+      x += barWidth + 1;
+    });
+  }, []);
+
+  // Animation frame for visualizations
+  useEffect(() => {
+    const animate = () => {
+      drawFrequency(localCanvasRef.current, localFrequencyData, '#3b82f6');
+      drawFrequency(remoteCanvasRef.current, remoteFrequencyData, '#10b981');
+      requestAnimationFrame(animate);
+    };
+    
+    animate();
+  }, [drawFrequency, localFrequencyData, remoteFrequencyData]);
+
+  // Audio element setup
   useEffect(() => {
     if (localAudioRef.current) localAudioRef.current.srcObject = localStream;
     if (remoteAudioRef.current) remoteAudioRef.current.srcObject = remoteStream;
   }, [localStream, remoteStream]);
 
+  // Scroll to bottom on new messages
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  // Microphone control
+  const toggleMicrophone = () => {
+    if (localStream) {
+      localStream.getAudioTracks().forEach(track => {
+        track.enabled = !track.enabled;
+      });
+      setAudioEnabled(!audioEnabled);
+    }
+  };
+
+  // Message sending with validation
+  const handleSendMessage = () => {
+    if (!messageInput.trim() || dataChannelState !== 'open') return;
+    
+    sendMessage(messageInput);
+    setMessageInput('');
+  };
+
+  // Enter key handling
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSendMessage();
+    }
+  };
+
   return (
-    <div className="min-h-screen p-8 bg-gray-50 dark:bg-black">
-      <div className="max-w-4xl mx-auto">
-        <div className="flex justify-between items-center mb-8">
+    <div className="min-h-screen p-4 bg-gray-50 dark:bg-gray-900">
+      <div className="max-w-4xl mx-auto space-y-6">
+        {/* Header */}
+        <div className="flex justify-between items-center">
           <h1 className="text-2xl font-bold text-blue-600 dark:text-blue-400">
-            AI-to-AI Protocol Session
+            WebRTC Communication
           </h1>
           <button
             onClick={() => router.push('/')}
-            className="flex items-center gap-2 px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+            className="flex items-center gap-2 px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
           >
-            <ArrowLeft className="w-4 h-4" />
-            Return Home
+            <ArrowLeft size={18} />
+            Back
           </button>
         </div>
 
-        <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-lg">
-          <div className="mb-6">
-            <p className="text-sm text-gray-600 dark:text-gray-400">
-              Your Node ID: <span className="font-mono text-blue-500">{clientId}</span>
-            </p>
+        {/* Connection Status Bar */}
+        <div className="p-4 bg-white dark:bg-black rounded-lg shadow">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium">Your ID:</span>
+                <code className="px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300 rounded">
+                  {clientId}
+                </code>
+                <button
+                  onClick={() => navigator.clipboard.writeText(clientId)}
+                  className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 transition-colors"
+                >
+                  Copy
+                </button>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className={`h-2 w-2 rounded-full ${
+                  connectionState === 'connected' ? 'bg-green-500' :
+                  connectionState === 'connecting' ? 'bg-yellow-500' : 'bg-red-500'
+                }`} />
+                <span className="text-sm capitalize">
+                  {connectionState}
+                  {dataChannelState && ` (${dataChannelState} data)`}
+                </span>
+              </div>
+            </div>
+            
+            <div className="flex gap-2">
+              <button
+                onClick={toggleMicrophone}
+                className={`p-2 rounded-full ${
+                  audioEnabled 
+                    ? 'bg-blue-100 text-blue-600 dark:bg-blue-900 dark:text-blue-300'
+                    : 'bg-red-100 text-red-600 dark:bg-red-900 dark:text-red-300'
+                }`}
+              >
+                {audioEnabled ? <Mic size={20} /> : <MicOff size={20} />}
+              </button>
+              <button
+                onClick={reconnect}
+                className="p-2 rounded-full bg-green-100 text-green-600 dark:bg-green-900 dark:text-green-300"
+              >
+                <RefreshCw size={20} />
+              </button>
+            </div>
           </div>
+        </div>
 
-          <div className="flex gap-4 mb-6">
+        {/* Call Controls */}
+        <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
+          <form 
+            onSubmit={(e) => {
+              e.preventDefault();
+              startCall(targetInput);
+            }}
+            className="flex gap-2"
+          >
             <input
               type="text"
-              placeholder="Enter Partner Node ID"
               value={targetInput}
               onChange={(e) => setTargetInput(e.target.value)}
+              placeholder="Enter peer ID"
               className="flex-1 px-4 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600"
             />
             <button
-              onClick={() => startCall(targetInput)}
-              disabled={!targetInput || isCalling}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              type="submit"
+              disabled={isCalling}
+              className={`px-4 py-2 rounded-lg flex items-center gap-2 ${
+                isCalling
+                  ? 'bg-gray-300 dark:bg-gray-700 cursor-not-allowed'
+                  : 'bg-blue-600 text-white hover:bg-blue-700 dark:hover:bg-blue-500'
+              }`}
             >
-              <Phone className="w-4 h-4" />
-              {isCalling ? 'Establishing Connection...' : 'Initiate Protocol'}
+              <Phone size={18} />
+              {isCalling ? 'Connecting...' : 'Start Call'}
             </button>
-          </div>
+          </form>
+        </div>
 
-          <div className="grid grid-cols-2 gap-4 mb-6">
-            <div className="bg-gray-100 dark:bg-gray-700 p-4 rounded-lg">
-              <h3 className="text-sm font-medium mb-2 text-blue-500">Local Node</h3>
-              <audio ref={localAudioRef} autoPlay muted className="w-full" />
-            </div>
-            <div className="bg-gray-100 dark:bg-gray-700 p-4 rounded-lg">
-              <h3 className="text-sm font-medium mb-2 text-blue-500">Remote Node</h3>
-              <audio ref={remoteAudioRef} autoPlay className="w-full" />
-            </div>
+        {/* Audio Visualizations */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
+            <h3 className="text-sm font-medium mb-2">Local Audio</h3>
+            <canvas 
+              ref={localCanvasRef} 
+              className="w-full h-24 bg-gray-100 dark:bg-gray-700 rounded"
+              width={400}
+              height={96}
+            />
+            <audio ref={localAudioRef} autoPlay playsInline muted />
           </div>
+          <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
+            <h3 className="text-sm font-medium mb-2">Remote Audio</h3>
+            <canvas 
+              ref={remoteCanvasRef} 
+              className="w-full h-24 bg-gray-100 dark:bg-gray-700 rounded"
+              width={400}
+              height={96}
+            />
+            <audio ref={remoteAudioRef} autoPlay playsInline />
+          </div>
+        </div>
 
-          <div className="border-t pt-6">
-            <div className="mb-4 h-64 overflow-y-auto bg-gray-50 dark:bg-gray-700 rounded-lg p-4">
-              {messages.map((msg, i) => (
-                <div
-                  key={i}
-                  className={`p-3 mb-2 rounded-lg ${
-                    msg.isLocal
-                      ? 'bg-blue-100 dark:bg-blue-900 ml-auto max-w-[80%]'
-                      : 'bg-gray-100 dark:bg-gray-600 mr-auto max-w-[80%]'
-                  }`}
-                >
-                  <p className="text-sm">{msg.text}</p>
+        {/* Chat Interface */}
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow">
+          <div className="p-4 border-b dark:border-gray-700">
+            <h2 className="flex items-center gap-2 font-semibold">
+              <MessageSquare size={18} />
+              Chat ({messages.length})
+            </h2>
+          </div>
+          
+          {/* Messages Container */}
+          <div className="h-64 overflow-y-auto p-4 space-y-3">
+            {messages.map((message, index) => (
+              <div 
+                key={index}
+                className={`flex ${message.isLocal ? 'justify-end' : 'justify-start'}`}
+              >
+                <div className={`max-w-[75%] px-3 py-2 rounded-lg ${
+                  message.isLocal
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-gray-100'
+                }`}>
+                  <p className="text-sm">{message.text}</p>
+                  {message.type === 'transcript' && (
+                    <div className="mt-1 text-xs opacity-70 flex items-center gap-1">
+                      <Mic size={12} />
+                      <span>Transcribed</span>
+                    </div>
+                  )}
                 </div>
-              ))}
-            </div>
+              </div>
+            ))}
+            <div ref={messagesEndRef} />
+          </div>
 
+          {/* Message Input */}
+          <div className="border-t dark:border-gray-700 p-4">
             <div className="flex gap-2">
-              <input
-                type="text"
+              <textarea
                 value={messageInput}
                 onChange={(e) => setMessageInput(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && sendMessage(messageInput)}
-                placeholder="Enter neural message..."
-                className="flex-1 px-4 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600"
+                onKeyDown={handleKeyPress}
+                placeholder={
+                  dataChannelState === 'open' 
+                    ? "Type a message..." 
+                    : "Connect to start messaging"
+                }
+                disabled={dataChannelState !== 'open'}
+                rows={1}
+                className="flex-1 px-4 py-2 border rounded-lg resize-none dark:bg-gray-700 dark:border-gray-600"
               />
               <button
-                onClick={() => sendMessage(messageInput)}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"
+                onClick={handleSendMessage}
+                disabled={dataChannelState !== 'open' || !messageInput.trim()}
+                className={`px-4 py-2 rounded-lg ${
+                  dataChannelState === 'open' && messageInput.trim()
+                    ? 'bg-blue-600 text-white hover:bg-blue-700 dark:hover:bg-blue-500'
+                    : 'bg-gray-300 dark:bg-gray-700 text-gray-500 dark:text-gray-400 cursor-not-allowed'
+                }`}
               >
-                <MessageSquare className="w-4 h-4" />
-                Transmit
+                Send
               </button>
             </div>
           </div>
