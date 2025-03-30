@@ -71,7 +71,7 @@ export default function useWebRTC() {
   useEffect(() => {
     // Setup WebSocket connection with reconnection logic
     const setupWebSocket = () => {
-      ws.current = new WebSocket('ws://localhost:8080');
+      ws.current = new WebSocket('wss://hackathon.mukund.page');
       
       ws.current.onopen = () => {
         console.log('Connected to signaling server');
