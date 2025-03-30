@@ -3,14 +3,35 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import useWebRTC from '@/hooks/useWebRTC';
 import { ArrowLeft, Phone, MessageSquare, Mic, MicOff, RefreshCw } from 'lucide-react';
+import { v4 as uuidv4 } from 'uuid';
+
+const generateOrRetrieveClientId = (): string => {
+  if (typeof window !== 'undefined') {
+    const storedId = localStorage.getItem('rtc_client_id');
+    if (storedId) {
+      return storedId;
+    } else {
+      const newId = uuidv4();
+      localStorage.setItem('rtc_client_id', newId);
+      return newId;
+    }
+  }
+  return 'default-client-id';
+};
 
 export default function WebRTCPage() {
   const router = useRouter();
+  const [clientId, setClientId] = useState<string>('');
+
+  // Initialize clientId in a useEffect to ensure it only runs on the client
+  useEffect(() => {
+    setClientId(generateOrRetrieveClientId());
+  }, []);
+
   const {
     localStream,
     remoteStream,
     messages,
-    clientId,
     targetId,
     startCall,
     sendMessage,
@@ -21,7 +42,7 @@ export default function WebRTCPage() {
     remoteFrequencyData,
     reconnect
   } = useWebRTC();
-  
+
   const [messageInput, setMessageInput] = useState('');
   const [targetInput, setTargetInput] = useState('');
   const [audioEnabled, setAudioEnabled] = useState(true);
@@ -50,7 +71,7 @@ export default function WebRTCPage() {
     const barWidth = (width / bufferLength) * 2.5;
     let x = 0;
     
-    frequencyData.forEach((value, i) => {
+    frequencyData.forEach((value) => {
       const barHeight = (value / 255) * height;
       ctx.fillStyle = color;
       ctx.fillRect(x, height - barHeight, barWidth, barHeight);
@@ -65,7 +86,6 @@ export default function WebRTCPage() {
       drawFrequency(remoteCanvasRef.current, remoteFrequencyData, '#10b981');
       requestAnimationFrame(animate);
     };
-    
     animate();
   }, [drawFrequency, localFrequencyData, remoteFrequencyData]);
 
@@ -93,7 +113,6 @@ export default function WebRTCPage() {
   // Message sending with validation
   const handleSendMessage = () => {
     if (!messageInput.trim() || dataChannelState !== 'open') return;
-    
     sendMessage(messageInput);
     setMessageInput('');
   };
@@ -141,8 +160,11 @@ export default function WebRTCPage() {
               </div>
               <div className="flex items-center gap-2">
                 <div className={`h-2 w-2 rounded-full ${
-                  connectionState === 'connected' ? 'bg-green-500' :
-                  connectionState === 'connecting' ? 'bg-yellow-500' : 'bg-red-500'
+                  connectionState === 'connected'
+                    ? 'bg-green-500'
+                    : connectionState === 'connecting'
+                      ? 'bg-yellow-500'
+                      : 'bg-red-500'
                 }`} />
                 <span className="text-sm capitalize">
                   {connectionState}

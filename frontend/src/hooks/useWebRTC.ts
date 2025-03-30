@@ -17,28 +17,35 @@ type Message = {
   type: MessageType;
 };
 
+// Generate a persistent client ID or use existing one from localStorage
+const generateOrRetrieveClientId = (): string => {
+  if (typeof window !== 'undefined') {
+    const storedId = localStorage.getItem('rtc_client_id');
+    if (storedId) {
+      return storedId;
+    }
+    // Generate new ID (e.g., using a simple random string)
+    const newId = 'user_' + Math.random().toString(36).substring(2, 9);
+    localStorage.setItem('rtc_client_id', newId);
+    return newId;
+  }
+  // Return empty string if not in a browser environment.
+  return '';
+};
+
 interface SignalMessage {
   type: string;
   data: any;
   source: string;
 }
 
-// Generate a persistent client ID or use existing one from localStorage
-const generateOrRetrieveClientId = (): string => {
-  const storedId = localStorage.getItem('rtc_client_id');
-  if (storedId) {
-    return storedId;
-  }
-  
-  // Generate new UUID
-  const newId = 'user_' + Math.random().toString(36).substring(2, 9);
-  localStorage.setItem('rtc_client_id', newId);
-  return newId;
-};
-
 export default function useWebRTC() {
-  // Use persistent client ID
-  const [clientId] = useState<string>(generateOrRetrieveClientId());
+  // Initialize clientId on the client side via useEffect.
+  const [clientId, setClientId] = useState<string>('');
+  useEffect(() => {
+    setClientId(generateOrRetrieveClientId());
+  }, []);
+
   const [targetId, setTargetId] = useState<string>('');
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
@@ -70,7 +77,7 @@ export default function useWebRTC() {
         console.log('Connected to signaling server');
         
         // Register with the server using our persistent ID
-        if (!isRegistered.current) {
+        if (!isRegistered.current && clientId) {
           console.log('Registering with ID:', clientId);
           sendSignal({
             type: 'register',
@@ -80,8 +87,8 @@ export default function useWebRTC() {
         }
       };
       
-      ws.current.onerror = (error) => {
-        console.error('WebSocket error:', error);
+      ws.current.onerror = (event) => {
+        // console.error('WebSocket error event:', event);
       };
       
       ws.current.onclose = () => {
@@ -120,16 +127,17 @@ export default function useWebRTC() {
     setupWebSocket();
     
     // Attempt to restore previous session if target ID exists
-    const storedTargetId = localStorage.getItem('rtc_target_id');
-    if (storedTargetId) {
-      setTargetId(storedTargetId);
-      // Don't automatically reconnect here to avoid unwanted calls
-      // Just restoring the UI state
+    if (typeof window !== 'undefined') {
+      const storedTargetId = localStorage.getItem('rtc_target_id');
+      if (storedTargetId) {
+        setTargetId(storedTargetId);
+        // Just restoring UI state; not auto-reconnecting.
+      }
     }
     
     // Save session data before the page unloads
     const handleBeforeUnload = () => {
-      if (targetId) {
+      if (targetId && typeof window !== 'undefined') {
         localStorage.setItem('rtc_target_id', targetId);
       }
     };
@@ -150,7 +158,7 @@ export default function useWebRTC() {
         peerConnection.current.close();
       }
     };
-  }, [clientId]);
+  }, [clientId, targetId]);
   
   useEffect(() => {
     if (!localStream) return;
@@ -230,8 +238,9 @@ export default function useWebRTC() {
     try {
       console.log('Starting call to:', targetId);
       
-      // Store target ID for reconnection purposes
-      localStorage.setItem('rtc_target_id', targetId);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('rtc_target_id', targetId);
+      }
       
       const stream = await navigator.mediaDevices.getUserMedia({ 
         audio: true, 
@@ -258,7 +267,6 @@ export default function useWebRTC() {
   };
   
   const createPeerConnection = (stream: MediaStream, isInitiator: boolean) => {
-    // Close existing connection if any
     if (peerConnection.current) {
       peerConnection.current.close();
     }
@@ -272,7 +280,6 @@ export default function useWebRTC() {
     
     peerConnection.current = new RTCPeerConnection(config);
     
-    // Add connection state change listener
     peerConnection.current.onconnectionstatechange = () => {
       console.log('Connection state changed:', peerConnection.current?.connectionState);
       setConnectionState(peerConnection.current?.connectionState || 'new');
@@ -282,18 +289,15 @@ export default function useWebRTC() {
       }
     };
     
-    // Add all tracks from local stream
     stream.getTracks().forEach(track => {
       peerConnection.current!.addTrack(track, stream);
     });
     
-    // Handle incoming tracks
     peerConnection.current.ontrack = (event) => {
       console.log('Received remote track');
       setRemoteStream(event.streams[0]);
     };
     
-    // Handle ICE candidates
     peerConnection.current.onicecandidate = ({ candidate }) => {
       if (candidate) {
         console.log('Sending ICE candidate');
@@ -305,11 +309,10 @@ export default function useWebRTC() {
       }
     };
     
-    // Create or receive data channel
     if (isInitiator) {
       console.log('Creating data channel');
       dataChannel.current = peerConnection.current.createDataChannel('chat', {
-        ordered: true // Ensure messages are delivered in order
+        ordered: true
       });
       setupDataChannel();
     } else {
@@ -329,7 +332,6 @@ export default function useWebRTC() {
       console.log('Data channel open');
       setDataChannelState(dataChannel.current?.readyState || null);
       
-      // Send any queued messages that might have failed previously
       const queuedMessages = localStorage.getItem('rtc_queued_messages');
       if (queuedMessages) {
         try {
@@ -340,7 +342,6 @@ export default function useWebRTC() {
               console.log("Sent queued message:", msg.text);
             }
           });
-          // Clear the queue after sending
           localStorage.removeItem('rtc_queued_messages');
         } catch (e) {
           console.error('Error processing queued messages:', e);
@@ -372,7 +373,6 @@ export default function useWebRTC() {
       }
     };
     
-    // Update state immediately to reflect current state
     setDataChannelState(dataChannel.current.readyState);
   };
   
@@ -400,8 +400,9 @@ export default function useWebRTC() {
         data: answer
       });
       
-      // Store target ID for reconnection
-      localStorage.setItem('rtc_target_id', offer.source);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('rtc_target_id', offer.source);
+      }
     } catch (error) {
       console.error('Error handling offer:', error);
       setIsCalling(false);
@@ -433,17 +434,14 @@ export default function useWebRTC() {
     console.log("Sending message:", message);
     console.log("Data channel state:", dataChannel.current?.readyState);
     
-    // Always add the message to local state for UI feedback
     setMessages(prev => [...prev, { text: message, isLocal: true, type }]);
     
-    // Try to send through data channel if it's open
     if (dataChannel.current?.readyState === 'open') {
       dataChannel.current.send(JSON.stringify(messageData));
       console.log("Message sent through data channel");
     } else {
       console.warn("Message added to UI but not sent: data channel not open");
       
-      // Queue the message for later sending
       const queuedMessages = localStorage.getItem('rtc_queued_messages');
       let messages = [];
       
@@ -475,7 +473,6 @@ export default function useWebRTC() {
   };
   
   const reconnect = () => {
-    // Attempt to reconnect with the last known target
     const storedTargetId = localStorage.getItem('rtc_target_id');
     if (storedTargetId) {
       console.log('Attempting to reconnect to:', storedTargetId);
